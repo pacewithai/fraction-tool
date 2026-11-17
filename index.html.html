@@ -1,0 +1,907 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>整數乘分數 - 互動白板 (已受版權保護)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f1f5f9;
+            overflow: hidden;
+            /* 1. 禁止反白選取文字，防止複製內容 */
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+        }
+        input[type="number"]::-webkit-inner-spin-button, 
+        input[type="number"]::-webkit-outer-spin-button { 
+            -webkit-appearance: none; 
+            margin: 0; 
+        }
+        input[type="number"] {
+            -moz-appearance: textfield;
+        }
+        .fraction-input {
+            text-align: center;
+            border: 2px solid #e2e8f0;
+            border-radius: 0.375rem;
+            font-weight: 600;
+            color: #1e293b;
+            background: white;
+            transition: all 0.2s;
+        }
+        .fraction-input:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+        }
+        .fraction-divider {
+            height: 3px;
+            background-color: #1e293b;
+            margin: 4px 0;
+            width: 100%;
+        }
+        
+        /* 拖曳相關樣式 */
+        .draggable {
+            cursor: grab;
+            position: absolute; /* 絕對定位以便自由移動 */
+            user-select: none;
+            touch-action: none; /* 防止手機瀏覽器預設行為 */
+        }
+        .draggable:active {
+            cursor: grabbing;
+        }
+        
+        /* 加入扇形互動效果 */
+        .fraction-slice {
+            cursor: pointer;
+            transition: opacity 0.2s, transform 0.2s;
+        }
+        .fraction-slice:hover {
+            filter: brightness(1.1);
+        }
+        .fraction-slice.counted {
+            opacity: 0.3;
+        }
+
+        #canvas-area {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #ffffff;
+            background-image: radial-gradient(#cbd5e1 1px, transparent 1px);
+            background-size: 20px 20px;
+        }
+
+        /* 版權浮水印遮罩 (可選) */
+        .watermark {
+            position: fixed;
+            bottom: 10px;
+            right: 15px;
+            color: rgba(100, 116, 139, 0.4);
+            font-size: 12px;
+            pointer-events: none;
+            z-index: 999;
+        }
+    </style>
+</head>
+<body class="h-screen w-screen flex" oncontextmenu="return false;">
+
+    <!-- 版權浮水印 -->
+    <div class="watermark">© 版權所有・請勿盜用</div>
+
+    <!-- 左側工具列 -->
+    <div class="w-24 bg-slate-800 text-white flex flex-col items-center py-6 shadow-2xl z-20 flex-shrink-0 overflow-y-auto">
+        <div class="text-sm font-bold mb-6 text-center text-slate-300">分母<br>選擇</div>
+        
+        <div class="flex flex-col gap-3 w-full px-2" id="toolbar-buttons">
+            <!-- 按鈕由 JS 動態生成 -->
+        </div>
+    </div>
+
+    <!-- 右側主畫布區 -->
+    <div class="flex-1 flex flex-col relative h-full">
+        
+        <!-- 頂部控制與算式區 -->
+        <div class="bg-white border-b border-slate-200 shadow-sm flex flex-col items-center justify-center z-10 px-8 py-4 flex-shrink-0">
+            
+            <!-- 模式切換 -->
+            <div class="flex gap-2 mb-4 bg-slate-100 p-1 rounded-lg">
+                <button id="mode-btn-WF" onclick="setMode('WF')" class="px-4 py-2 rounded-md font-medium text-sm transition-all bg-white shadow text-blue-600">整數 × 分數</button>
+                <button id="mode-btn-FW" onclick="setMode('FW')" class="px-4 py-2 rounded-md font-medium text-sm transition-all text-slate-500 hover:text-slate-700 hover:bg-slate-200">分數 × 整數</button>
+                <button id="mode-btn-FF" onclick="setMode('FF')" class="px-4 py-2 rounded-md font-medium text-sm transition-all text-slate-500 hover:text-slate-700 hover:bg-slate-200">分數 × 分數</button>
+                <button id="mode-btn-QUIZ" onclick="setMode('QUIZ')" class="px-4 py-2 rounded-md font-medium text-sm transition-all text-purple-600 hover:text-purple-700 hover:bg-purple-100 ml-2 border border-purple-200">出題模式 🎮</button>
+            </div>
+
+            <div class="flex items-center space-x-6 text-3xl font-semibold text-slate-800 relative w-full justify-center">
+                
+                <!-- 出題模式專用 UI (預設隱藏) -->
+                <div id="quiz-container" class="hidden items-center justify-center space-x-6 w-full absolute bg-white z-10 h-full">
+                    <div id="quiz-question" class="text-2xl font-bold text-slate-700">準備出題...</div>
+                    <button onclick="checkQuizAnswer()" class="bg-purple-500 hover:bg-purple-600 text-white px-6 py-2 rounded-xl font-bold shadow-md transition-all text-lg ml-4">
+                        批改答案
+                    </button>
+                    <button onclick="startQuiz()" class="text-slate-500 hover:text-slate-700 underline text-sm ml-4">
+                        換一題
+                    </button>
+                    <div id="quiz-feedback" class="text-lg font-bold ml-4"></div>
+                </div>
+
+                <!-- 算式左側 (Factor 1) -->
+                <div id="factor-1-container" class="flex items-center justify-center min-w-[4rem]">
+                    <input type="number" id="whole-1" value="4" min="1" max="10" class="fraction-input w-16 h-16 text-2xl shadow-inner" onchange="updateVisuals()">
+                    <div id="frac-1" class="flex flex-col items-center w-12" style="display: none;">
+                        <input type="number" id="num-1" value="1" min="1" max="12" class="fraction-input h-10 w-12 text-xl" onchange="updateVisuals()">
+                        <div class="fraction-divider"></div>
+                        <input type="number" id="den-1" value="2" min="2" max="12" class="fraction-input h-10 w-12 text-xl bg-slate-50 focus:bg-white" onchange="updateVisuals()">
+                    </div>
+                </div>
+                
+                <span class="text-slate-400">×</span>
+
+                <!-- 算式右側 (Factor 2) -->
+                <div id="factor-2-container" class="flex items-center justify-center min-w-[4rem]">
+                    <input type="number" id="whole-2" value="4" min="1" max="10" class="fraction-input w-16 h-16 text-2xl shadow-inner" onchange="updateVisuals()" style="display: none;">
+                    <div id="frac-2" class="flex flex-col items-center w-12">
+                        <input type="number" id="num-2" value="4" min="1" max="12" class="fraction-input h-10 w-12 text-xl" onchange="updateVisuals()">
+                        <div class="fraction-divider"></div>
+                        <input type="number" id="den-2" value="5" min="2" max="12" class="fraction-input h-10 w-12 text-xl bg-slate-50 focus:bg-white" onchange="updateVisuals()">
+                    </div>
+                </div>
+
+                <span class="text-slate-400 ml-4 mr-2">=</span>
+
+                <!-- 顯示答案按鈕 -->
+                <button id="toggle-answer-btn" onclick="toggleAnswer()" class="bg-indigo-100 hover:bg-indigo-200 text-indigo-700 px-4 py-3 rounded-xl font-bold shadow-sm transition-all flex items-center gap-2 text-lg">
+                    <span id="toggle-icon">👀</span> <span id="toggle-text">顯示答案</span>
+                </button>
+
+                <!-- 結果顯示區 (預設隱藏，使用寬度與透明度動畫) -->
+                <div id="answer-area" class="flex items-center opacity-0 pointer-events-none w-0 overflow-hidden transition-all duration-500 ease-in-out origin-left">
+                    <!-- 假分數結果 -->
+                    <div class="flex flex-col items-center w-16 ml-2">
+                        <div id="result-num" class="h-10 text-xl flex items-center justify-center text-blue-600 font-bold">16</div>
+                        <div class="fraction-divider bg-blue-600"></div>
+                        <div id="result-den" class="h-10 text-xl flex items-center justify-center text-blue-600 font-bold">5</div>
+                    </div>
+
+                    <span id="equals-mixed" class="text-slate-400 mx-4" style="display: none;">=</span>
+
+                    <!-- 帶分數結果 -->
+                    <div id="mixed-result" class="flex items-center space-x-2 text-green-600" style="display: none;">
+                        <div id="mixed-whole" class="text-4xl font-bold">3</div>
+                        <div class="flex flex-col items-center w-12" id="mixed-fraction-part">
+                            <div id="mixed-num" class="h-8 text-xl flex items-center justify-center font-bold">1</div>
+                            <div class="fraction-divider bg-green-600"></div>
+                            <div id="mixed-den" class="h-8 text-xl flex items-center justify-center font-bold">5</div>
+                        </div>
+                    </div>
+                </div>
+
+                <button onclick="updateVisuals()" class="absolute right-0 bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg shadow transition font-medium text-sm flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                    重置排列
+                </button>
+            </div>
+        </div>
+
+        <!-- 互動白板區 -->
+        <div id="canvas-area" class="flex-1">
+            <!-- 圓形圖將由 JS 動態生成至此 -->
+            
+            <!-- 垃圾桶 (刪除區) -->
+            <div id="trash-zone" class="absolute bottom-8 right-8 bg-red-50 border-4 border-dashed border-red-300 text-red-500 rounded-3xl w-40 h-40 flex flex-col items-center justify-center shadow-2xl opacity-0 pointer-events-none transition-all duration-300 z-0 scale-90">
+                <span class="text-5xl mb-2">🗑️</span>
+                <span class="font-bold text-lg">拖曳至此刪除</span>
+            </div>
+        </div>
+
+        <!-- 浮動提示 -->
+        <div class="absolute bottom-4 left-4 bg-white/90 backdrop-blur px-4 py-2 rounded-lg shadow-lg border border-slate-200 text-sm text-slate-600 pointer-events-none transition-all" id="hint-box">
+            💡 提示：切換上方模式，或從左側快速選擇分母。支援在白板上自由拖曳分數圓形。<b>將相同分母的圖形靠近放開，會自動吸附合併！</b>
+        </div>
+
+    </div>
+
+    <script>
+        let currentMode = 'WF'; // WF: 整數x分數, FW: 分數x整數, FF: 分數x分數, QUIZ: 出題模式
+        let activeDenInput = 'den-2'; // 記錄目前操作的是哪一個分母欄位
+        let isAnswerShown = false; // 控制答案顯示狀態
+        let quizTargetValue = 0; // 出題模式的目標分子總和
+        let quizTargetDen = 1; // 出題模式的目標分母
+
+        // 切換顯示/隱藏答案
+        function toggleAnswer() {
+            isAnswerShown = !isAnswerShown;
+            const btn = document.getElementById('toggle-answer-btn');
+            const icon = document.getElementById('toggle-icon');
+            const text = document.getElementById('toggle-text');
+            const area = document.getElementById('answer-area');
+
+            if (isAnswerShown) {
+                // 顯示狀態
+                btn.classList.replace('bg-indigo-100', 'bg-slate-100');
+                btn.classList.replace('hover:bg-indigo-200', 'hover:bg-slate-200');
+                btn.classList.replace('text-indigo-700', 'text-slate-600');
+                icon.textContent = '🙈';
+                text.textContent = '隱藏答案';
+                
+                area.classList.remove('opacity-0', 'pointer-events-none', 'w-0');
+                area.classList.add('opacity-100', 'w-[200px]'); // 展開寬度
+            } else {
+                // 隱藏狀態
+                btn.classList.replace('bg-slate-100', 'bg-indigo-100');
+                btn.classList.replace('hover:bg-slate-200', 'hover:bg-indigo-200');
+                btn.classList.replace('text-slate-600', 'text-indigo-700');
+                icon.textContent = '👀';
+                text.textContent = '顯示答案';
+                
+                area.classList.add('opacity-0', 'pointer-events-none', 'w-0');
+                area.classList.remove('opacity-100', 'w-[200px]');
+            }
+        }
+
+        // 強制隱藏答案 (當題目改變時)
+        function resetAnswerState() {
+            if (isAnswerShown) {
+                toggleAnswer();
+            }
+        }
+
+        // 定義不同分母的顏色對應
+        const colorPalette = {
+            2: { bg: '#fdf2f8', fill: '#f472b6' }, // 粉紅
+            3: { bg: '#fff7ed', fill: '#fb923c' }, // 橘色
+            4: { bg: '#fefce8', fill: '#facc15' }, // 黃色
+            5: { bg: '#f0fdf4', fill: '#4ade80' }, // 綠色
+            6: { bg: '#f0f9ff', fill: '#38bdf8' }, // 淺藍
+            8: { bg: '#faf5ff', fill: '#c084fc' }, // 紫色
+            10: { bg: '#fdf2f8', fill: '#f9a8d4' }, // 淺粉
+            12: { bg: '#f8fafc', fill: '#94a3b8' }, // 灰色
+        };
+
+        const allowedDenominators = [2, 3, 4, 5, 6, 8, 10, 12];
+
+        function setMode(mode) {
+            currentMode = mode;
+            
+            // 更新按鈕視覺
+            const modes = ['WF', 'FW', 'FF', 'QUIZ'];
+            modes.forEach(m => {
+                const btn = document.getElementById(`mode-btn-${m}`);
+                if (m === mode) {
+                    btn.className = `px-4 py-2 rounded-md font-medium text-sm transition-all bg-white shadow ${m==='QUIZ'?'text-purple-600 border border-purple-200':'text-blue-600'}`;
+                } else {
+                    btn.className = `px-4 py-2 rounded-md font-medium text-sm transition-all text-slate-500 hover:text-slate-700 hover:bg-slate-200 ${m==='QUIZ'?'ml-2':''}`;
+                }
+            });
+
+            const isQuiz = mode === 'QUIZ';
+            document.getElementById('quiz-container').style.display = isQuiz ? 'flex' : 'none';
+            document.getElementById('factor-1-container').style.opacity = isQuiz ? '0' : '1';
+            document.getElementById('factor-2-container').style.opacity = isQuiz ? '0' : '1';
+            document.getElementById('factor-1-container').style.pointerEvents = isQuiz ? 'none' : 'auto';
+            document.getElementById('factor-2-container').style.pointerEvents = isQuiz ? 'none' : 'auto';
+            
+            const btn = document.getElementById('toggle-answer-btn');
+            if(btn) btn.style.display = isQuiz ? 'none' : 'flex';
+
+            document.getElementById('hint-box').innerHTML = isQuiz 
+                ? "🎮 <b>出題模式</b>：請從左側點擊產生對應的碎片，拖曳到空白圓盤上完成組合！" 
+                : "💡 提示：切換上方模式，或從左側快速選擇分母。支援在白板上自由拖曳分數圓形。<b>將相同分母的圖形靠近放開，會自動吸附合併！</b>";
+
+            // 切換輸入框顯示/隱藏
+            document.getElementById('whole-1').style.display = mode === 'WF' ? 'block' : 'none';
+            document.getElementById('frac-1').style.display = mode !== 'WF' ? 'flex' : 'none';
+            
+            document.getElementById('whole-2').style.display = mode === 'FW' ? 'block' : 'none';
+            document.getElementById('frac-2').style.display = mode !== 'FW' ? 'flex' : 'none';
+
+            // 設定預設活躍的分母輸入框 (給側邊欄使用)
+            if (mode === 'WF') activeDenInput = 'den-2';
+            if (mode === 'FW') activeDenInput = 'den-1';
+            
+            if (isQuiz) {
+                startQuiz();
+            } else {
+                updateVisuals();
+            }
+        }
+
+        // 產生隨機題目
+        function startQuiz() {
+            const w = Math.floor(Math.random() * 4) + 2; // 2~5
+            const n = Math.floor(Math.random() * 3) + 1; // 1~3
+            const dList = [3, 4, 5, 6, 8];
+            const d = dList[Math.floor(Math.random() * dList.length)];
+            
+            quizTargetValue = w * n;
+            quizTargetDen = d;
+
+            document.getElementById('quiz-question').innerHTML = `請組合出： <b class="text-3xl text-purple-600 mx-2">${w} × ${n}/${d}</b>`;
+            document.getElementById('quiz-feedback').innerHTML = '';
+
+            const canvas = document.getElementById('canvas-area');
+            // 保留垃圾桶元素，清空其他圓形
+            Array.from(canvas.children).forEach(child => {
+                if (child.id !== 'trash-zone') child.remove();
+            });
+
+            // 畫出空白圓盤
+            const totalCircles = Math.ceil(quizTargetValue / d);
+            for(let i=0; i<totalCircles; i++) {
+                const svg = createFractionCircle(0, d, 160);
+                svg.dataset.isBase = "true"; // 標記為出題模式的底盤
+                svg.style.left = `${100 + i * 180}px`;
+                svg.style.top = `60px`;
+                setupDraggable(svg);
+                canvas.appendChild(svg);
+            }
+        }
+
+        // 批改出題模式
+        function checkQuizAnswer() {
+            let totalValue = 0;
+            const circles = document.querySelectorAll('.fraction-circle');
+            circles.forEach(circle => {
+                const num = parseInt(circle.dataset.num);
+                const den = parseInt(circle.dataset.den);
+                if (den === quizTargetDen) {
+                    totalValue += num;
+                }
+            });
+
+            const feedback = document.getElementById('quiz-feedback');
+            if (totalValue === quizTargetValue) {
+                feedback.innerHTML = '<span class="text-green-500">🎉 答對了！太棒了！</span>';
+                // 放點煙火特效或跳動
+                circles.forEach(c => {
+                    c.style.transform += " scale(1.1)";
+                    setTimeout(() => c.style.transform = c.style.transform.replace(" scale(1.1)", ""), 300);
+                });
+            } else {
+                feedback.innerHTML = '<span class="text-red-500">🤔 數量好像不太對，再試試看喔！</span>';
+            }
+        }
+
+        // 初始化側邊欄工具列
+        function initToolbar() {
+            const toolbar = document.getElementById('toolbar-buttons');
+            allowedDenominators.forEach(den => {
+                const btn = document.createElement('button');
+                btn.className = `w-full h-14 rounded-xl flex items-center justify-center text-lg font-bold transition-all border-2 border-transparent hover:border-white/50`;
+                btn.style.backgroundColor = colorPalette[den].fill;
+                btn.style.color = '#fff';
+                btn.style.textShadow = '0 1px 2px rgba(0,0,0,0.2)';
+                
+                // 模擬分數顯示
+                btn.innerHTML = `<div class="flex flex-col items-center leading-none text-sm"><span class="border-b-2 border-white w-4 text-center">1</span><span>${den}</span></div>`;
+                
+                btn.onclick = () => setDenominator(den);
+                toolbar.appendChild(btn);
+            });
+        }
+
+        // 透過側邊欄設定分母
+        function setDenominator(den) {
+            if (currentMode === 'QUIZ') {
+                // 出題模式下，點擊側邊欄會產生一個碎片
+                spawnSlice(den);
+            } else {
+                document.getElementById(activeDenInput).value = den;
+                updateVisuals();
+            }
+        }
+
+        // 在畫布中央產生一塊碎片 (出題模式專用)
+        function spawnSlice(den) {
+            const canvas = document.getElementById('canvas-area');
+            const svg = createFractionCircle(1, den, 160);
+            
+            // 在稍微隨機的位置產生，避免完全重疊
+            const offsetX = 50 + Math.random() * 50;
+            const offsetY = 300 + Math.random() * 50;
+            
+            svg.style.left = `${offsetX}px`;
+            svg.style.top = `${offsetY}px`;
+            setupDraggable(svg);
+            canvas.appendChild(svg);
+            
+            // 提示動畫
+            svg.style.transform = "scale(0)";
+            setTimeout(() => svg.style.transform = "scale(1)", 10);
+        }
+
+        // 繪製圓形內容的核心邏輯 (抽離出來以便更新時重複使用)
+        function renderCircleContent(svg, numerator, denominator, size) {
+            svg.innerHTML = ''; // 清空內容
+            svg.dataset.num = numerator;
+            svg.dataset.den = denominator;
+            svg.classList.add("fraction-circle"); // 加入識別 class
+
+            const radius = size / 2 - 4; 
+            const cx = size / 2;
+            const cy = size / 2;
+            const sliceAngle = 360 / denominator;
+            const colors = colorPalette[denominator] || { bg: '#f8fafc', fill: '#cbd5e1' };
+            const strokeWidth = denominator > 20 ? "0.5" : "1.5";
+
+            // 繪製背景底圓 (代表整體)
+            const bgCircle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+            bgCircle.setAttribute("cx", cx);
+            bgCircle.setAttribute("cy", cy);
+            bgCircle.setAttribute("r", radius);
+            bgCircle.setAttribute("fill", colors.bg);
+            bgCircle.setAttribute("stroke", "#94a3b8");
+            bgCircle.setAttribute("stroke-width", "2");
+            svg.appendChild(bgCircle);
+
+            if (numerator === 0) return;
+
+            // 如果分子等於或大於分母 (滿圓)
+            if (numerator >= denominator) {
+                const fullCircle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+                fullCircle.setAttribute("cx", cx);
+                fullCircle.setAttribute("cy", cy);
+                fullCircle.setAttribute("r", radius);
+                fullCircle.setAttribute("fill", colors.fill);
+                fullCircle.setAttribute("stroke", "#475569");
+                fullCircle.setAttribute("stroke-width", strokeWidth);
+                svg.appendChild(fullCircle);
+                
+                // 畫出等份線條
+                for(let i=0; i<denominator; i++) {
+                    const angle = i * sliceAngle - 90; 
+                    const rad = angle * Math.PI / 180;
+                    const x2 = cx + radius * Math.cos(rad);
+                    const y2 = cy + radius * Math.sin(rad);
+                    
+                    const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                    line.setAttribute("x1", cx);
+                    line.setAttribute("y1", cy);
+                    line.setAttribute("x2", x2);
+                    line.setAttribute("y2", y2);
+                    line.setAttribute("stroke", "#1e293b");
+                    line.setAttribute("stroke-width", strokeWidth);
+                    svg.appendChild(line);
+                }
+            } else {
+                // 繪製各個扇形
+                for (let i = 0; i < numerator; i++) {
+                    const startAngle = i * sliceAngle - 90;
+                    const endAngle = (i + 1) * sliceAngle - 90;
+                    
+                    const startRad = startAngle * Math.PI / 180;
+                    const endRad = endAngle * Math.PI / 180;
+
+                    const x1 = cx + radius * Math.cos(startRad);
+                    const y1 = cy + radius * Math.sin(startRad);
+                    const x2 = cx + radius * Math.cos(endRad);
+                    const y2 = cy + radius * Math.sin(endRad);
+
+                    const largeArcFlag = sliceAngle > 180 ? 1 : 0;
+
+                    const pathData = `
+                        M ${cx} ${cy}
+                        L ${x1} ${y1}
+                        A ${radius} ${radius} 0 ${largeArcFlag} 1 ${x2} ${y2}
+                        Z
+                    `;
+
+                    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+                    path.setAttribute("d", pathData);
+                    path.setAttribute("fill", colors.fill);
+                    path.setAttribute("stroke", "#1e293b"); 
+                    path.setAttribute("stroke-width", strokeWidth);
+                    
+                    path.classList.add("fraction-slice");
+                    path.onclick = function(e) {
+                        e.stopPropagation();
+                        this.classList.toggle("counted");
+                    };
+
+                    svg.appendChild(path);
+
+                    if (denominator <= 24) {
+                        const textAngle = startAngle + (sliceAngle / 2);
+                        const textRad = textAngle * Math.PI / 180;
+                        const textX = cx + (radius * 0.65) * Math.cos(textRad);
+                        const textY = cy + (radius * 0.65) * Math.sin(textRad);
+
+                        const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                        text.setAttribute("x", textX);
+                        text.setAttribute("y", textY);
+                        text.setAttribute("text-anchor", "middle");
+                        text.setAttribute("dominant-baseline", "central");
+                        text.setAttribute("fill", "#0f172a");
+                        text.setAttribute("font-size", "14");
+                        text.setAttribute("font-weight", "bold");
+                        text.textContent = `1/${denominator}`;
+                        svg.appendChild(text);
+                    }
+                }
+            }
+        }
+
+        // 產生一個單一的 SVG 圓形分數圖
+        function createFractionCircle(numerator, denominator, size = 160) {
+            const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+            svg.setAttribute("width", size);
+            svg.setAttribute("height", size);
+            svg.setAttribute("viewBox", `0 0 ${size} ${size}`);
+            
+            // 加入拖曳專用 Class 與動畫過渡
+            svg.classList.add("draggable", "drop-shadow-lg", "hover:drop-shadow-xl", "transition-transform");
+            svg.style.position = 'absolute'; // 確保可以自由拖曳
+
+            renderCircleContent(svg, numerator, denominator, size);
+
+            return svg;
+        }
+
+        // 更新畫面上的算式與圖形 (一般模式)
+        function updateVisuals() {
+            if (currentMode === 'QUIZ') return; // 出題模式不執行此邏輯
+
+            let w1 = parseInt(document.getElementById('whole-1').value) || 0;
+            let n1 = parseInt(document.getElementById('num-1').value) || 0;
+            let d1 = parseInt(document.getElementById('den-1').value) || 1;
+            
+            let w2 = parseInt(document.getElementById('whole-2').value) || 0;
+            let n2 = parseInt(document.getElementById('num-2').value) || 0;
+            let d2 = parseInt(document.getElementById('den-2').value) || 1;
+
+            // 基礎防呆，分母不能小於1
+            if (d1 < 1) d1 = 1; document.getElementById('den-1').value = d1;
+            if (d2 < 1) d2 = 1; document.getElementById('den-2').value = d2;
+            if (w1 < 0) w1 = 0; document.getElementById('whole-1').value = w1;
+            if (w2 < 0) w2 = 0; document.getElementById('whole-2').value = w2;
+            if (n1 < 0) n1 = 0; document.getElementById('num-1').value = n1;
+            if (n2 < 0) n2 = 0; document.getElementById('num-2').value = n2;
+
+            // 每次更改題目時，自動隱藏答案
+            resetAnswerState();
+
+            // 運算結果邏輯
+            let totalNum, totalDen;
+            if (currentMode === 'WF') {
+                totalNum = w1 * n2;
+                totalDen = d2;
+            } else if (currentMode === 'FW') {
+                totalNum = n1 * w2;
+                totalDen = d1;
+            } else if (currentMode === 'FF') {
+                totalNum = n1 * n2;
+                totalDen = d1 * d2;
+            }
+
+            document.getElementById('result-num').textContent = totalNum;
+            document.getElementById('result-den').textContent = totalDen;
+
+            const mixedWhole = Math.floor(totalNum / totalDen);
+            const mixedNum = totalNum % totalDen;
+            
+            const mixedResultEl = document.getElementById('mixed-result');
+            const equalsMixedEl = document.getElementById('equals-mixed');
+            const mixedFractionPart = document.getElementById('mixed-fraction-part');
+
+            if (mixedWhole > 0 || (mixedWhole === 0 && mixedNum === 0)) {
+                mixedResultEl.style.display = 'flex';
+                equalsMixedEl.style.display = 'block';
+                document.getElementById('mixed-whole').textContent = mixedWhole > 0 ? mixedWhole : '';
+                
+                if (mixedNum === 0) {
+                    mixedFractionPart.style.display = 'none';
+                } else {
+                    mixedFractionPart.style.display = 'flex';
+                    document.getElementById('mixed-num').textContent = mixedNum;
+                    document.getElementById('mixed-den').textContent = totalDen;
+                }
+            } else {
+                mixedResultEl.style.display = 'none';
+                equalsMixedEl.style.display = 'none';
+            }
+
+            // --- 繪製白板區 ---
+            const canvas = document.getElementById('canvas-area');
+            // 保留垃圾桶元素，清空其他圓形
+            Array.from(canvas.children).forEach(child => {
+                if (child.id !== 'trash-zone') child.remove();
+            }); 
+
+            const canvasWidth = canvas.clientWidth || window.innerWidth - 100;
+            const size = 160;
+            const gap = 20;
+            let startX = 40;
+            let startY = 40;
+
+            if (currentMode === 'WF' || currentMode === 'FW') {
+                // 整數x分數 或 分數x整數 -> 顯示過程中的「組數」
+                let count = currentMode === 'WF' ? w1 : w2;
+                let c_num = currentMode === 'WF' ? n2 : n1;
+                let c_den = currentMode === 'WF' ? d2 : d1;
+
+                const cols = Math.min(count, Math.floor(canvasWidth / (size + gap)) || 1);
+                if (cols > 0) {
+                    startX = (canvasWidth - (cols * (size + gap) - gap)) / 2;
+                }
+
+                for (let i = 0; i < count; i++) {
+                    let remainingNum = c_num;
+                    let circleCount = 0;
+                    
+                    while(remainingNum > 0 || circleCount === 0) {
+                        const piecesToDraw = Math.min(remainingNum, c_den);
+                        const svg = createFractionCircle(piecesToDraw, c_den, size);
+                        
+                        const col = i % cols;
+                        const row = Math.floor(i / cols);
+                        const xOffset = startX + col * (size + gap) + (circleCount * 10);
+                        const yOffset = startY + row * (size + gap + 40) + (circleCount * 10);
+                        
+                        svg.style.left = `${xOffset}px`;
+                        svg.style.top = `${yOffset}px`;
+                        setupDraggable(svg);
+                        canvas.appendChild(svg);
+                        
+                        remainingNum -= piecesToDraw;
+                        circleCount++;
+                        if(remainingNum <= 0) break;
+                    }
+                }
+            } else if (currentMode === 'FF') {
+                // 分數x分數 -> 直接畫出相乘後的結果圖 (因為展示互疊切割較複雜，改以直接顯示「結果」的面積圓形)
+                let remainingNum = totalNum;
+                let c_den = totalDen;
+                
+                const totalCircles = Math.ceil(totalNum / totalDen) || 1;
+                const cols = Math.min(totalCircles, Math.floor(canvasWidth / (size + gap)) || 1);
+                if (cols > 0) {
+                    startX = (canvasWidth - (cols * (size + gap) - gap)) / 2;
+                }
+
+                let circleCount = 0;
+                while(remainingNum > 0 || circleCount === 0) {
+                    const piecesToDraw = Math.min(remainingNum, c_den);
+                    const svg = createFractionCircle(piecesToDraw, c_den, size);
+                    
+                    const col = circleCount % cols;
+                    const row = Math.floor(circleCount / cols);
+                    const xOffset = startX + col * (size + gap);
+                    const yOffset = startY + row * (size + gap + 40);
+                    
+                    svg.style.left = `${xOffset}px`;
+                    svg.style.top = `${yOffset}px`;
+                    setupDraggable(svg);
+                    canvas.appendChild(svg);
+                    
+                    remainingNum -= piecesToDraw;
+                    circleCount++;
+                    if(remainingNum <= 0) break;
+                }
+            }
+        }
+
+        // 拖曳邏輯實作
+        let activeElement = null;
+        let initialX, initialY, currentX, currentY;
+        let zIndexCounter = 100;
+
+        function setupDraggable(el) {
+            el.addEventListener("mousedown", dragStart);
+            el.addEventListener("touchstart", dragStart, {passive: false});
+        }
+
+        function dragStart(e) {
+            activeElement = e.currentTarget;
+            zIndexCounter++;
+            activeElement.style.zIndex = zIndexCounter;
+
+            // 如果拖曳的元素是有分數的(非空白底盤)，則顯示垃圾桶
+            if (parseInt(activeElement.dataset.num) > 0) {
+                const trash = document.getElementById('trash-zone');
+                trash.classList.remove('opacity-0', 'pointer-events-none', 'scale-90');
+                trash.classList.add('opacity-100', 'scale-100', 'z-50');
+            }
+
+            if (e.type === "touchstart") {
+                initialX = e.touches[0].clientX - (activeElement.xOffset || 0);
+                initialY = e.touches[0].clientY - (activeElement.yOffset || 0);
+            } else {
+                initialX = e.clientX - (activeElement.xOffset || 0);
+                initialY = e.clientY - (activeElement.yOffset || 0);
+            }
+        }
+
+        function drag(e) {
+            if (activeElement) {
+                e.preventDefault(); 
+                if (e.type === "touchmove") {
+                    currentX = e.touches[0].clientX - initialX;
+                    currentY = e.touches[0].clientY - initialY;
+                } else {
+                    currentX = e.clientX - initialX;
+                    currentY = e.clientY - initialY;
+                }
+                activeElement.xOffset = currentX;
+                activeElement.yOffset = currentY;
+                
+                // 拖曳時暫停 transition，避免延遲感
+                activeElement.style.transition = "none";
+                activeElement.style.transform = `translate(${currentX}px, ${currentY}px)`;
+                
+                // 檢查是否懸停在垃圾桶上方
+                if (parseInt(activeElement.dataset.num) > 0) {
+                    const trash = document.getElementById('trash-zone');
+                    const trashRect = trash.getBoundingClientRect();
+                    const elRect = activeElement.getBoundingClientRect();
+                    const centerX = elRect.left + elRect.width / 2;
+                    const centerY = elRect.top + elRect.height / 2;
+
+                    if (centerX >= trashRect.left && centerX <= trashRect.right &&
+                        centerY >= trashRect.top && centerY <= trashRect.bottom) {
+                        trash.classList.add('bg-red-200', 'border-red-500', 'scale-110');
+                        trash.classList.remove('bg-red-50', 'border-red-300', 'scale-100');
+                    } else {
+                        trash.classList.add('bg-red-50', 'border-red-300', 'scale-100');
+                        trash.classList.remove('bg-red-200', 'border-red-500', 'scale-110');
+                    }
+                }
+            }
+        }
+
+        function dragEnd(e) {
+            if (activeElement) {
+                initialX = currentX;
+                initialY = currentY;
+                let droppedEl = activeElement;
+                
+                // 恢復 transition
+                droppedEl.style.transition = "transform 0.2s";
+                activeElement = null;
+
+                let isDeleted = false;
+
+                // 垃圾桶刪除邏輯
+                if (parseInt(droppedEl.dataset.num) > 0) {
+                    const trash = document.getElementById('trash-zone');
+                    const trashRect = trash.getBoundingClientRect();
+                    const elRect = droppedEl.getBoundingClientRect();
+                    const centerX = elRect.left + elRect.width / 2;
+                    const centerY = elRect.top + elRect.height / 2;
+
+                    if (centerX >= trashRect.left && centerX <= trashRect.right &&
+                        centerY >= trashRect.top && centerY <= trashRect.bottom) {
+                        
+                        if (droppedEl.dataset.isBase === "true") {
+                            // 如果是底盤，清空內容但不刪除元素
+                            const size = parseInt(droppedEl.getAttribute('width')) || 160;
+                            renderCircleContent(droppedEl, 0, parseInt(droppedEl.dataset.den), size);
+                            // 彈跳特效
+                            droppedEl.style.transform += " scale(1.1)";
+                            setTimeout(() => droppedEl.style.transform = droppedEl.style.transform.replace(" scale(1.1)", ""), 200);
+                        } else {
+                            // 如果是獨立產生的碎片，縮小後刪除
+                            droppedEl.style.transform += " scale(0)";
+                            setTimeout(() => droppedEl.remove(), 200);
+                            isDeleted = true;
+                        }
+                    }
+
+                    // 隱藏並重置垃圾桶樣式
+                    trash.classList.add('opacity-0', 'pointer-events-none', 'scale-90', 'bg-red-50', 'border-red-300');
+                    trash.classList.remove('opacity-100', 'scale-100', 'z-50', 'bg-red-200', 'border-red-500', 'scale-110');
+                }
+
+                if (!isDeleted) {
+                    // 檢查是否可以吸附合併
+                    checkCollisionAndMerge(droppedEl);
+                }
+            }
+        }
+
+        // 檢查碰撞與合併邏輯
+        function checkCollisionAndMerge(draggedEl) {
+            if(!draggedEl.classList.contains('fraction-circle')) return;
+            
+            const rect1 = draggedEl.getBoundingClientRect();
+            const center1 = { x: rect1.left + rect1.width/2, y: rect1.top + rect1.height/2 };
+
+            let circles = Array.from(document.querySelectorAll('.fraction-circle'));
+            
+            for(let targetEl of circles) {
+                if (targetEl === draggedEl) continue;
+                
+                const den1 = parseInt(draggedEl.dataset.den);
+                const den2 = parseInt(targetEl.dataset.den);
+                if (den1 !== den2) continue; // 分母不同無法合併
+
+                const num1 = parseInt(draggedEl.dataset.num);
+                const num2 = parseInt(targetEl.dataset.num);
+                
+                // 如果任一個是空圓(通常是出題模式的底盤)，或是目標已經滿了，或者是自己沒切片，跳過不合併
+                if (num2 >= den2 || num1 === 0) continue;
+
+                const rect2 = targetEl.getBoundingClientRect();
+                const center2 = { x: rect2.left + rect2.width/2, y: rect2.top + rect2.height/2 };
+                
+                // 判斷距離是否夠近 (兩圓心距離小於半徑的 1.2 倍左右)
+                const dist = Math.hypot(center1.x - center2.x, center1.y - center2.y);
+                const size = parseInt(draggedEl.getAttribute('width')) || 160;
+                
+                if (dist < size * 0.7) { 
+                    const total = num1 + num2;
+                    if (total <= den2) {
+                        // 完全吸附進目標圓
+                        renderCircleContent(targetEl, total, den2, size);
+                        targetEl.style.transform += " scale(1.1)";
+                        setTimeout(() => targetEl.style.transform = targetEl.style.transform.replace(" scale(1.1)", ""), 200);
+                        draggedEl.remove();
+                    } else {
+                        // 目標圓填滿，自己保留剩餘的
+                        renderCircleContent(targetEl, den2, den2, size);
+                        renderCircleContent(draggedEl, total - den2, den1, size);
+                        
+                        targetEl.style.transform += " scale(1.1)";
+                        draggedEl.style.transform += " scale(1.1)";
+                        setTimeout(() => {
+                            targetEl.style.transform = targetEl.style.transform.replace(" scale(1.1)", "");
+                            draggedEl.style.transform = draggedEl.style.transform.replace(" scale(1.1)", "");
+                        }, 200);
+                    }
+                    break; // 每次拖放只處理一個合併
+                }
+            }
+        }
+
+        // 綁定全域拖曳事件
+        const canvasArea = document.getElementById('canvas-area');
+        canvasArea.addEventListener("mousemove", drag);
+        canvasArea.addEventListener("touchmove", drag, {passive: false});
+        window.addEventListener("mouseup", dragEnd);
+        window.addEventListener("touchend", dragEnd);
+
+        // 初始化
+        window.onload = () => {
+            // 2. 網域防護範例 (選用：若發佈到公開網站，可檢查 location.hostname)
+            // 填入您合法的網域，若被放上不明網站會自動跳轉或報錯
+            /*
+            const allowedDomain = "yourdomain.com";
+            if (window.location.hostname !== "localhost" && window.location.hostname !== allowedDomain) {
+                document.body.innerHTML = '<div style="display:flex;justify-content:center;align-items:center;height:100vh;font-size:24px;color:red;">此工具受版權保護，未經授權不得轉載。</div>';
+                return;
+            }
+            */
+
+            // 3. 攔截常見的開發者工具快捷鍵 (F12, Ctrl+Shift+I, Ctrl+U 等)
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'F12' || 
+                    (e.ctrlKey && e.shiftKey && (e.key === 'I' || e.key === 'C' || e.key === 'J')) || 
+                    (e.ctrlKey && e.key === 'U')) {
+                    e.preventDefault();
+                    return false;
+                }
+            });
+
+            initToolbar();
+            
+            // 綁定分母輸入框的 Focus 事件，以便讓側邊欄知道要更新哪一個
+            document.getElementById('den-1').addEventListener('focus', () => { activeDenInput = 'den-1'; });
+            document.getElementById('den-2').addEventListener('focus', () => { activeDenInput = 'den-2'; });
+
+            setTimeout(updateVisuals, 50);
+
+            window.addEventListener('resize', () => {
+                clearTimeout(window.resizeTimer);
+                window.resizeTimer = setTimeout(updateVisuals, 200);
+            });
+        };
+    </script>
+</body>
+</html>
